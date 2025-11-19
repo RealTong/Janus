@@ -1,0 +1,36 @@
+redis:
+  addr: 127.0.0.1:6379
+  password: ""
+  db: 0
+
+telegram:
+  enabled: true
+  bot_token: "1234567890:ABC-DEF1234567890"
+  chat_id: "-1001234567890"
+
+log:
+  level: "info" # debug, info, warn, error
+  file: "app.log"
+  max_size: 100 # MB
+  max_backups: 3
+  max_age: 28 # days
+  compress: true
+
+
+http:
+  enabled: true
+  port: 8080
+  password: "your-secret-password"  # HTTP API 访问密码
+
+system:
+  command_key: "janus:command"  # Redis 中的指令 Key
+  check_interval: 3  # 心跳轮询间隔（秒）
+  linux:
+    # 运行 grep menuentry /boot/grub/grub.cfg
+    # 找到 Windows Boot Manager 的 entry，然后复制出来
+    grub_win_entry: "Windows Boot Manager (on /dev/nvme1n1p1)"
+    shutdown_cmd: "shutdown -h now"
+    reboot_cmd: "reboot"
+  windows:
+    shutdown_cmd: "shutdown /s /t 0"
+    reboot_cmd: "shutdown /r /t 0"
