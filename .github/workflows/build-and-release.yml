@@ -1,0 +1,168 @@
+name: Build and Release
+
+on:
+    push:
+        tags:
+            - 'v*'  # 只在推送以 v 开头的 tag 时触发，例如 v1.0.0
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v5
+              with:
+                  fetch-depth: 0  # 获取完整历史，用于生成版本信息
+            
+            - name: Set up Go
+              uses: actions/setup-go@v5
+              with:
+                  go-version: 1.25.4
+            
+            - name: Display Go version
+              run: go version
+            
+            - name: Get version from tag
+              id: tag
+              run: |
+                  VERSION=${GITHUB_REF#refs/tags/}
+                  echo "version=$VERSION" >> $GITHUB_OUTPUT
+                  echo "📦 Building version: $VERSION"
+            
+            - name: Install dependencies
+              run: |
+                  go mod download
+                  go mod verify
+            
+            - name: Build Linux(amd64)
+              run: GOOS=linux GOARCH=amd64 go build -o janus-linux-amd64 -ldflags="-s -w"
+            
+            - name: Build Linux(arm64)
+              run: GOOS=linux GOARCH=arm64 go build -o janus-linux-arm64 -ldflags="-s -w"
+            
+            - name: Build Windows(amd64)
+              run: GOOS=windows GOARCH=amd64 go build -o janus-windows-amd64.exe -ldflags="-s -w"
+            
+            - name: Build Windows(arm64)
+              run: GOOS=windows GOARCH=arm64 go build -o janus-windows-arm64.exe -ldflags="-s -w"
+            
+            - name: Create checksums
+              run: |
+                  sha256sum janus-linux-amd64 > checksums.txt
+                  sha256sum janus-linux-arm64 >> checksums.txt
+                  sha256sum janus-windows-amd64.exe >> checksums.txt
+                  sha256sum janus-windows-arm64.exe >> checksums.txt
+            
+            - name: Upload Linux(amd64)
+              uses: actions/upload-artifact@v4
+              with:
+                  name: janus-linux-amd64
+                  path: janus-linux-amd64
+                  retention-days: 30
+            
+            - name: Upload Linux(arm64)
+              uses: actions/upload-artifact@v4
+              with:
+                  name: janus-linux-arm64
+                  path: janus-linux-arm64
+                  retention-days: 30
+            
+            - name: Upload Windows(amd64)
+              uses: actions/upload-artifact@v4
+              with:
+                  name: janus-windows-amd64
+                  path: janus-windows-amd64.exe
+                  retention-days: 30
+            
+            - name: Upload Windows(arm64)
+              uses: actions/upload-artifact@v4
+              with:
+                  name: janus-windows-arm64
+                  path: janus-windows-arm64.exe
+                  retention-days: 30
+            
+            - name: Upload checksums
+              uses: actions/upload-artifact@v4
+              with:
+                  name: checksums
+                  path: checksums.txt
+                  retention-days: 30
+
+    release:
+        needs: build
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write  # 需要写入权限来创建 Release
+        
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v5
+            
+            - name: Get version from tag
+              id: tag
+              run: |
+                  VERSION=${GITHUB_REF#refs/tags/}
+                  echo "version=$VERSION" >> $GITHUB_OUTPUT
+                  echo "🚀 Releasing version: $VERSION"
+            
+            - name: Download all artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  path: ./artifacts
+            
+            - name: Prepare release assets
+              run: |
+                  VERSION=${GITHUB_REF#refs/tags/}
+                  mkdir -p release
+                  
+                  # 复制并重命名文件
+                  find artifacts -type f -name "janus-linux-amd64" -exec cp {} release/janus-${VERSION}-linux-amd64 \;
+                  find artifacts -type f -name "janus-linux-arm64" -exec cp {} release/janus-${VERSION}-linux-arm64 \;
+                  find artifacts -type f -name "janus-windows-amd64.exe" -exec cp {} release/janus-${VERSION}-windows-amd64.exe \;
+                  find artifacts -type f -name "janus-windows-arm64.exe" -exec cp {} release/janus-${VERSION}-windows-arm64.exe \;
+                  
+                  # 复制并更新校验和文件
+                  if [ -f "artifacts/checksums/checksums.txt" ]; then
+                      cp artifacts/checksums/checksums.txt release/checksums.txt
+                      cd release
+                      sed -i "s/janus-linux-amd64/janus-${VERSION}-linux-amd64/g" checksums.txt
+                      sed -i "s/janus-linux-arm64/janus-${VERSION}-linux-arm64/g" checksums.txt
+                      sed -i "s/janus-windows-amd64.exe/janus-${VERSION}-windows-amd64.exe/g" checksums.txt
+                      sed -i "s/janus-windows-arm64.exe/janus-${VERSION}-windows-arm64.exe/g" checksums.txt
+                      cd ..
+                  fi
+                  
+                  echo "📦 Release assets prepared:"
+                  ls -lh release/
+            
+            - name: Create Release
+              uses: softprops/action-gh-release@v2
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                  name: Release ${{ steps.tag.outputs.version }}
+                  tag_name: ${{ steps.tag.outputs.version }}
+                  body: |
+                      ## 🚀 Janus Agent ${{ steps.tag.outputs.version }}
+                      
+                      ### 📦 下载
+                      
+                      - **Linux (amd64)**: `janus-${{ steps.tag.outputs.version }}-linux-amd64`
+                      - **Linux (arm64)**: `janus-${{ steps.tag.outputs.version }}-linux-arm64`
+                      - **Windows (amd64)**: `janus-${{ steps.tag.outputs.version }}-windows-amd64.exe`
+                      - **Windows (arm64)**: `janus-${{ steps.tag.outputs.version }}-windows-arm64.exe`
+                      
+                      ### 📝 校验和
+                      
+                      所有文件的 SHA256 校验和请查看 `checksums.txt`
+                      
+                      ### 🔧 安装说明
+                      
+                      详细安装说明请查看项目文档。
+                      
+                      ### 📋 变更日志
+                      
+                      查看 [Commits](https://github.com/${{ github.repository }}/compare/${{ github.event.before }}...${{ steps.tag.outputs.version }}) 了解本次发布的变更。
+                  files: release/*
+                  draft: false
+                  prerelease: false
