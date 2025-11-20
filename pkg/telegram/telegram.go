@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"janus/config"
+	"janus/pkg/osinfo"
 	"janus/pkg/redis"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -120,80 +121,89 @@ func sendCommandToRedis(cmd string) error {
 	return redis.Set(config.GlobalConfig.System.CommandKey, cmd, 0)
 }
 
-// StartCommandHandler 启动 Telegram Bot 命令处理
-func StartCommandHandler() {
+// StartInlineKeyBoard 启动内联键盘
+func StartInlineKeyBoard() error {
 	if Service == nil || !Service.enabled {
-		return
+		return nil
 	}
+	u := tgbotapi.NewUpdate(0)
+	u.Timeout = 60
+	updates := Service.bot.GetUpdatesChan(u)
 
-	// 设置命令菜单
 	commands := []tgbotapi.BotCommand{
 		{
 			Command:     "start",
-			Description: "开始使用 Janus",
+			Description: "开始使用 Janus，显示交互式命令菜单，使用 /help 查看帮助",
 		},
 		{
-			Command:     "menu",
-			Description: "显示命令菜单",
-		},
-		{
-			Command:     "shutdown",
-			Description: "关机",
-		},
-		{
-			Command:     "switch",
-			Description: "切换系统（Linux ↔ Windows）",
-		},
-		{
-			Command:     "status",
-			Description: "查看系统状态",
+			Command:     "help",
+			Description: "显示帮助信息",
 		},
 	}
 
 	_, err := Service.bot.Request(tgbotapi.NewSetMyCommands(commands...))
 	if err != nil {
-		log.Printf("⚠️ 设置命令菜单失败: %v", err)
+		log.Printf("⚠️ Bot 命令菜单设置失败: %v", err)
 	}
 
-	// 配置更新
-	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 60
-	updates := Service.bot.GetUpdatesChan(u)
-
-	log.Println("🤖 Telegram Bot 命令处理器已启动")
-
 	for update := range updates {
-		if update.Message == nil {
-			continue
-		}
-
-		// 检查是否是授权用户
-		if !isAuthorizedUser(update.Message.From.ID) {
+		if update.Message != nil && !isAuthorizedUser(update.Message.From.ID) {
 			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "❌ 未授权的用户")
 			Service.bot.Send(msg)
 			continue
 		}
+		if update.Message != nil {
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, update.Message.Text)
+			switch update.Message.Command() {
+			case "start", "menu":
+				osInfo := osinfo.GetCurrentOSInfo()
+				targetOS := ""
+				if osInfo.OS == "linux" {
+					targetOS = "Windows"
+				} else {
+					targetOS = "Linux"
+				}
+				msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+					tgbotapi.NewInlineKeyboardRow(
+						tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("🛑 关机(%s)", strings.ToUpper(osInfo.OS)), "shutdown"),
+					),
+					tgbotapi.NewInlineKeyboardRow(
+						tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("🔄 切换到(%s)", targetOS), "switch"),
+					),
+					tgbotapi.NewInlineKeyboardRow(
+						tgbotapi.NewInlineKeyboardButtonData("📊 查看系统状态", "status"),
+					),
+				)
 
-		// 处理命令
-		command := update.Message.Command()
-		text := update.Message.Text
+				msg.Text = fmt.Sprintf("🖥️ *Welcome to Janus Control Panel*\n\n*Current System Info:*\n• OS: %s\n• Status: %s\n• Private IP: %s\n• User: %s", strings.ToUpper(osInfo.OS), "🟢 Running", osInfo.PrivateIP, osInfo.UserInfo)
+				msg.ParseMode = "Markdown"
+				if _, err := Service.bot.Send(msg); err != nil {
+					panic(err)
+				}
+			case "help":
+				msg.Text = "🤖 *Janus 帮助*\n\n*命令:*\n• /start - 开始使用 Janus，显示交互式命令菜单\n• /help - 显示帮助信息"
+				if _, err := Service.bot.Send(msg); err != nil {
+					panic(err)
+				}
+			default:
+				msg.Text = "❓ 未知命令，使用 /help 查看帮助"
+				if _, err := Service.bot.Send(msg); err != nil {
+					panic(err)
+				}
+			}
 
-		switch command {
-		case "start", "menu":
-			handleMenu(update.Message.Chat.ID)
-		case "shutdown":
-			handleShutdown(update.Message.Chat.ID)
-		case "switch":
-			handleSwitch(update.Message.Chat.ID)
-		case "status":
-			handleStatus(update.Message.Chat.ID)
-		default:
-			if strings.HasPrefix(text, "/") {
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "❓ 未知命令，使用 /menu 查看可用命令")
-				Service.bot.Send(msg)
+		} else if update.CallbackQuery != nil {
+			switch update.CallbackQuery.Data {
+			case "shutdown":
+				handleShutdown(update.CallbackQuery.Message.Chat.ID)
+			case "switch":
+				handleSwitch(update.CallbackQuery.Message.Chat.ID)
+			case "status":
+				handleStatus(update.CallbackQuery.Message.Chat.ID)
 			}
 		}
 	}
+	return nil
 }
 
 // isAuthorizedUser 检查用户是否授权
@@ -202,30 +212,6 @@ func isAuthorizedUser(userID int64) bool {
 	var configChatID int64
 	fmt.Sscanf(config.GlobalConfig.Telegram.ChatID, "%d", &configChatID)
 	return userID == configChatID
-}
-
-// handleMenu 处理菜单命令
-func handleMenu(chatID int64) {
-	currentOS := runtime.GOOS
-	menuText := fmt.Sprintf(`🖥️ *Janus 控制面板*
-
-*系统信息:*
-• 操作系统: %s
-• 状态: 运行中
-
-*可用命令:*
-/start - 开始使用
-/menu - 显示此菜单
-/shutdown - 关机
-/switch - 切换系统 (Linux ↔ Windows)
-/status - 查看系统状态
-
-*使用说明:*
-发送命令即可执行相应操作。`, strings.ToUpper(currentOS))
-
-	msg := tgbotapi.NewMessage(chatID, menuText)
-	msg.ParseMode = "Markdown"
-	Service.bot.Send(msg)
 }
 
 // handleShutdown 处理关机命令
