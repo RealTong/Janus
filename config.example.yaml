@@ -19,7 +19,7 @@ log:
 
 http:
   enabled: true
-  port: 8080
+  port: 50810
   password: "your-secret-password"  # HTTP API 访问密码
 
 system:
