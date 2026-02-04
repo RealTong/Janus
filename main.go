@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"janus/config"
-	"janus/pkg/osinfo"
 	"janus/pkg/redis"
 	"janus/pkg/telegram"
 
@@ -40,6 +39,10 @@ func main() {
 	if err := telegram.InitTelegram(&config.GlobalConfig.Telegram); err != nil {
 		log.Printf("⚠️ Telegram 初始化失败: %v", err)
 	} else {
+		// 发送上线通知（带键盘菜单）
+		if err := telegram.SendStartMenu(); err != nil {
+			log.Printf("⚠️ 发送上线通知失败: %v", err)
+		}
 		// 启动 Telegram Bot 命令处理
 		go telegram.StartInlineKeyBoard()
 	}
@@ -49,11 +52,6 @@ func main() {
 		go startHTTPServer(currentOS)
 		log.Printf("🌐 HTTP 服务器启动在端口 %d", config.GlobalConfig.HTTP.Port)
 	}
-
-	// 6. 发送上线通知
-	osInfo := osinfo.GetCurrentOSInfo()
-	telegram.SendMessage(fmt.Sprintf("🖥️ *Janus Online*\nOS: %s\nIP: %s\nUser: %s\nTime: %s",
-		strings.ToUpper(osInfo.OS), osInfo.PrivateIP, osInfo.UserInfo, time.Now().Format("2006-01-02 15:04:05")))
 
 	// 7. 启动心跳轮询
 	interval := time.Duration(config.GlobalConfig.System.CheckInterval) * time.Second
