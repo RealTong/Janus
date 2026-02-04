@@ -121,6 +121,47 @@ func sendCommandToRedis(cmd string) error {
 	return redis.Set(config.GlobalConfig.System.CommandKey, cmd, 0)
 }
 
+// SendStartMenu 发送带键盘菜单的上线通知
+func SendStartMenu() error {
+	if Service == nil || !Service.enabled {
+		return nil
+	}
+
+	osInfo := osinfo.GetCurrentOSInfo()
+	targetOS := "Windows"
+	if osInfo.OS != "linux" {
+		targetOS = "Linux"
+	}
+
+	text := fmt.Sprintf("🟢 *Janus Online*\n\n*Current System Info:*\n• OS: %s\n• Status: 🟢 Running\n• Private IP: %s\n• User: %s\n• Time: %s",
+		strings.ToUpper(osInfo.OS),
+		osInfo.PrivateIP,
+		osInfo.UserInfo,
+		time.Now().Format("2006-01-02 15:04:05"))
+
+	msg := tgbotapi.NewMessage(Service.chatID, text)
+	msg.ParseMode = "Markdown"
+	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("🛑 关机(%s)", strings.ToUpper(osInfo.OS)), "shutdown"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(fmt.Sprintf("🔄 切换到(%s)", targetOS), "switch"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("📊 查看系统状态", "status"),
+		),
+	)
+
+	_, err := Service.bot.Send(msg)
+	if err != nil {
+		return fmt.Errorf("发送上线通知失败：%w", err)
+	}
+
+	log.Println("✅ 上线通知已发送")
+	return nil
+}
+
 // StartInlineKeyBoard 启动内联键盘
 func StartInlineKeyBoard() error {
 	if Service == nil || !Service.enabled {
